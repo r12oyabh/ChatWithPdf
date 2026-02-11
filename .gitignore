@@ -1,0 +1,9 @@
+.venv
+env
+.env
+app.log
+__pycache__
+mlflow.db
+mlartifacts
+chroma_db
+uploaded_files
