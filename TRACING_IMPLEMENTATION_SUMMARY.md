@@ -97,25 +97,24 @@ Traces vector database operations:
    - Collection name
 
 ## 4. **Evaluation Service** (`evaluation.py`)
-**🆕 Now uses GPT-4o for accurate evaluation!**
+**🆕 Now uses GPT-4o for accurate evaluation & RAGAS Library!**
 
 ### Main Trace
 - **Name**: `RAG_Evaluation`
 - **Type**: `PARSER`
 
 ### Child Spans
-1. **Evaluate_Faithfulness** (`CHAT_MODEL`)
-   - **Model**: GPT-4o (Azure OpenAI)
-   - Question (truncated to 200 chars)
-   - Answer (truncated to 200 chars)
-   - Context chunk count
-   - Faithfulness score (0.0-1.0)
+1. **Answer Quality Metrics** (Fast, per-request)
+   - **Evaluate_Faithfulness** (`CHAT_MODEL`)
+     - Faithfulness score (0.0-1.0)
+   - **Evaluate_Relevance** (`CHAT_MODEL`)
+     - Relevance score (0.0-1.0)
 
-2. **Evaluate_Relevance** (`CHAT_MODEL`)
-   - **Model**: GPT-4o (Azure OpenAI)
-   - Question
-   - Answer
-   - Relevance score (0.0-1.0)
+2. **Retrieval Quality Metrics** (RAGAS Standard)
+   - **RAGAS_Evaluation** (`PARSER`)
+     - Uses `ragas` library with GPT-4o
+     - **Context Precision**: Proportion of relevant chunks
+     - **Context Recall**: Is ground truth in context?
 
 3. **Calculate_Quality_Metrics** (`PARSER`)
    - All metrics aggregated

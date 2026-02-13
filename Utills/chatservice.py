@@ -23,7 +23,7 @@ class ChatService:
     """Service class for handling chat interactions with bots."""
     def __init__(self):
         """Initialize chat service."""
-        mlflow.gemini.autolog()
+        mlflow.openai.autolog()
         self.llm=LLMManager().llm
         self.sessions: Dict[str, ChatMessageHistory] = {}
         # Create prompt template
@@ -62,9 +62,19 @@ Important:
                 "mlflow.trace.session": session_id,   # conversation/session id
                 "bot_id": bot_id,                     # optional custom metadata
                 "base_vector_db": "ChromaDB",
-                "retriever_k": 3
+                "retriever_k": "3",
+                "question": question
+
             })
-            
+
+            with mlflow.start_run(run_name=f"chat_{bot_id}_{session_id}", nested=True):
+            # Log input parameters
+                mlflow.log_param("bot_id", bot_id)
+                mlflow.log_param("session_id", session_id)
+                mlflow.log_param("retriever_k", 3)
+                mlflow.log_param("vector_db", "ChromaDB")
+            # Log the input question
+            mlflow.log_text(question, "input_question.txt")
             # Create vector store with user isolation
             vectorstore = chromadb_service.create_vectorstore(user_id=bot_id)
             retriever = vectorstore.as_retriever(
@@ -100,26 +110,20 @@ Important:
                 answer = str(answer)
             # Format source documents
             source_docs = []
-            context_texts = []
             for doc in response.get('context', []):
                 content = doc.page_content if hasattr(doc, 'page_content') else str(doc)
                 source_docs.append({
                     'page_content': content,
                     'metadata': doc.metadata if hasattr(doc, 'metadata') else {}
                 })
-                context_texts.append(content)
-            
-            # Run evaluation (asynchronously would be better, but doing sync for now as requested)
-            try:
-                logger.info("Starting evaluation...")
-                eval_metrics = evaluation_service.evaluate(
-                    question=question,
-                    answer=answer,
-                    context=context_texts
-                )
-                logger.info(f"Evaluation metrics: {eval_metrics}")
-            except Exception as e:
-                logger.error(f"Failed to run evaluation: {e}")
+
+            return {
+                'bot_id': bot_id,
+                'question': question,
+                'answer': answer,
+                'source_documents': source_docs,
+                'timestamp': datetime.now()
+            }
 
             return {
                 'bot_id': bot_id,
@@ -165,6 +169,29 @@ Important:
             Number of active sessions
         """
         return len(self.sessions)
+
+    @mlflow.trace(name="Background_RAG_Evaluation", span_type="PARSER")
+    def evaluate_chat_response(self, question: str, answer: str, source_documents: list):
+        """
+        Run evaluation for a chat response in the background.
+        Args:
+            question: User's question
+            answer: Generated answer
+            source_documents: List of source documents
+        """
+        try:
+            logger.info("🎬 Starting background evaluation...")
+            context_texts = [doc['page_content'] for doc in source_documents]
+            
+            # Use evaluation service
+            eval_metrics = evaluation_service.evaluate(
+                question=question,
+                answer=answer,
+                context=context_texts
+            )
+            logger.info(f"✅ Background evaluation metrics: {eval_metrics}")
+        except Exception as e:
+            logger.error(f"❌ Failed to run background evaluation: {e}")
 
 # Global chat service instance
 chat_service = ChatService()

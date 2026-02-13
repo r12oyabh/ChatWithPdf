@@ -1,11 +1,13 @@
 """
 API routes for chat interactions.
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from Schema.schema import(ChatRequest,ChatResponse,ErrorResponse)
 from Utills.chatservice import chat_service
 from Utills.botservice import bot_service
 from Config.logger import logger
+from langchain.agents.middleware import PIIMiddleware
+
 #ROUTING API ENDPOINT FOR THE CHAT  
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -44,7 +46,7 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
         }
     }
 )
-async def chat_with_bot(request: ChatRequest) -> ChatResponse:
+async def chat_with_bot(request: ChatRequest, background_tasks: BackgroundTasks) -> ChatResponse:
     logger.info("Chat request received | bot_id=%s | session_id=%s",request.bot_id,request.session_id)
     
     """
@@ -52,6 +54,7 @@ async def chat_with_bot(request: ChatRequest) -> ChatResponse:
     
     Args:
         request: ChatRequest containing bot_id, question, and optional session_id
+        background_tasks: FastAPI background tasks
         
     Returns:
         ChatResponse with answer and source documents
@@ -73,8 +76,17 @@ async def chat_with_bot(request: ChatRequest) -> ChatResponse:
             question=request.question,
             session_id=request.session_id
         )
+
+        # Add evaluation to background tasks
+        background_tasks.add_task(
+            chat_service.evaluate_chat_response,
+            question=request.question,
+            answer=response['answer'],
+            source_documents=response['source_documents']
+        )
+
         logger.info(
-            "Chat response successful | bot_id=%s | session_id=%s",
+            "Chat response successful | bot_id=%s | session_id=%s (Evaluation scheduled in background)",
             request.bot_id,
             request.session_id,
         )

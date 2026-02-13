@@ -356,7 +356,7 @@ def render_chat_interface():
 def render_footer():
     """Render the application footer."""
     st.markdown("---")
-    st.caption("Multi-Agent Chatbot System | Powered by LangChain, Pinecone, and Google Gemini")
+    st.caption("Multi-Agent Chatbot System | Powered by LangChain, ChromaDb, and Google Gemini")
 
 
 # =============================================================================
