@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import List, Dict
 import mlflow
 
+from opentelemetry import trace
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter  # ✅ Modern
 from Config.logger import logger
 from Config.settings import settings
@@ -16,6 +18,9 @@ from Utills.file_utills import (
     extract_text_from_file,
     generate_bot_id,generate_namespace,cleanup_files
 )
+
+# Initialize tracer
+tracer = trace.get_tracer("bot.service")
 
 class BotService:
     """Service class for bot creation and management."""
@@ -27,7 +32,6 @@ class BotService:
             length_function=len
         )
 
-    @mlflow.trace(name="Create_Bot_Pipeline", span_type="CHAIN")
     def create_bot(self, team_name: str, bot_name: str, file_paths: List[str]) -> Dict:
         """
         Create a new bot with its own knowledge base using ChromaDB collection.
@@ -50,78 +54,49 @@ class BotService:
             logger.info(f"   Bot ID: {bot_id}")
             logger.info(f"   Namespace: {namespace}")
             
-            # Update trace metadata
-            mlflow.update_current_trace(
-                metadata={
-                    "bot_id": bot_id,
-                    "team_name": team_name,
-                    "bot_name": bot_name,
-                    "num_files": len(file_paths),
-                    "operation": "create_bot"
-                }
-            )
+            # Get current span to set attributes
+            current_span = trace.get_current_span()
+            if current_span.is_recording():
+                current_span.set_attribute("mlflow.spanType", "CHAIN")
+                current_span.set_attribute("mlflow.trace.metadata.bot_id", bot_id)
+                current_span.set_attribute("mlflow.trace.metadata.team_name", team_name)
+                current_span.set_attribute("mlflow.trace.metadata.bot_name", bot_name)
+                current_span.set_attribute("mlflow.trace.metadata.num_files", len(file_paths))
+                current_span.set_attribute("mlflow.trace.metadata.operation", "create_bot")
             
             # STEP 1: Extract text from files
-            with mlflow.start_span(name="Extract_Text_From_Files", span_type="PARSER") as extract_span:
-                extract_span.set_inputs({
-                    "num_files": len(file_paths),
-                    "file_names": [os.path.basename(fp) for fp in file_paths]
-                })
+            with tracer.start_as_current_span("extract_text") as otel_span:
+                otel_span.set_attribute("mlflow.spanType", "PARSER")
+                otel_span.set_attribute("num_files", len(file_paths))
+                otel_span.set_attribute("file_names", [os.path.basename(fp) for fp in file_paths])
                 
                 all_text, file_names = self._extract_text_from_files(file_paths)
                 
-                extract_span.set_outputs({
-                    "total_characters": len(all_text),
-                    "processed_files": len(file_names)
-                })
-                extract_span.set_attributes({
-                    "extraction_successful": True,
-                    "parser_type": "multi_format"
-                })
+                otel_span.set_attribute("total_characters", len(all_text))
+                otel_span.set_attribute("processed_files", len(file_names))
+                otel_span.set_attribute("extraction_successful", True)
             
             logger.info(f"   ✅ Extracted {len(all_text)} characters from {len(file_names)} file(s)")
             
             # STEP 2: Split text into chunks
-            with mlflow.start_span(name="Chunk_Documents", span_type="PARSER") as chunk_span:
-                chunk_span.set_inputs({
-                    "text_length": len(all_text),
-                    "chunk_size": settings.chunk_size,
-                    "chunk_overlap": settings.chunk_overlap
-                })
+            with tracer.start_as_current_span("chunk_text") as otel_span:
+                otel_span.set_attribute("mlflow.spanType", "PARSER")
+                otel_span.set_attribute("chunk_size", settings.chunk_size)
+                otel_span.set_attribute("chunk_overlap", settings.chunk_overlap)
+                otel_span.set_attribute("text_length", len(all_text))
                 
                 chunks = self.text_splitter.split_text(all_text)
                 
-                chunk_span.set_outputs({
-                    "num_chunks": len(chunks),
-                    "avg_chunk_size": sum(len(c) for c in chunks) // len(chunks) if chunks else 0
-                })
-                chunk_span.set_attributes({
-                    "splitter_type": "RecursiveCharacterTextSplitter",
-                    "chunk_size": settings.chunk_size,
-                    "chunk_overlap": settings.chunk_overlap
-                })
+                otel_span.set_attribute("num_chunks", len(chunks))
+                avg_chunk_size = sum(len(c) for c in chunks) // len(chunks) if chunks else 0
+                otel_span.set_attribute("avg_chunk_size", avg_chunk_size)
             
             logger.info(f"   ✅ Created {len(chunks)} chunks")
             
             # STEP 3: Store vectors in ChromaDB
-            with mlflow.start_span(name="Store_In_VectorDB", span_type="EMBEDDING") as store_span:
-                store_span.set_inputs({
-                    "num_chunks": len(chunks),
-                    "user_id": bot_id,
-                    "vector_db": "ChromaDB"
-                })
-                
-                logger.info(f"   🔄 Storing vectors in ChromaDB collection for user '{bot_id}'...")
-                chromadb_service.store_documents(texts=chunks, user_id=bot_id)
-                
-                store_span.set_outputs({
-                    "success": True,
-                    "stored_chunks": len(chunks)
-                })
-                store_span.set_attributes({
-                    "collection_name": f"user_{bot_id}",
-                    "embedding_model": settings.EMBEDDING_MODEL
-                })
+            # We don't need a wrapper span here as chroma_service.store_documents has its own OTEL span
+            logger.info(f"   🔄 Storing vectors in ChromaDB collection for user '{bot_id}'...")
+            chromadb_service.store_documents(texts=chunks, user_id=bot_id)
             
             # Create bot metadata
             bot_metadata = {
@@ -181,7 +156,6 @@ class BotService:
         
         return all_text, file_names
     
-    @mlflow.trace
     def delete_bot(self, bot_id: str) -> None:
         """
         Delete a bot and its associated data.
@@ -193,12 +167,13 @@ class BotService:
             Exception: If deletion fails
         """
         try:
-            chromadb_service.delete_user_collection(bot_id)
-            logger.info(f"✅ Bot '{bot_id}' deleted successfully")
+            with tracer.start_as_current_span("delete_bot") as span:
+                span.set_attribute("bot.id", bot_id)
+                chromadb_service.delete_user_collection(bot_id)
+                logger.info(f"✅ Bot '{bot_id}' deleted successfully")
         except Exception as e:
             raise Exception(f"Error deleting bot: {str(e)}")
     
-    @mlflow.trace
     def bot_exists(self, bot_id: str) -> bool:
         """
         Check if a bot exists.

@@ -79,7 +79,6 @@ def setup_logger() -> Logger:
     Set up a logger with the settings from the Settings object.
     """
     log_dir = settings.LOG_DIR
-    print("log",log_dir)
 
     os.makedirs(log_dir, exist_ok=True)
     

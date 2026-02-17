@@ -161,14 +161,14 @@ Non-technical stakeholders can now see:
 - **Quality assurance**: Every response scored on faithfulness and relevance
 - **Performance**: Timing for each step to identify bottlenecks
 
-### 4. **Proper Span Types**
-Using official MLflow span types:
-- `CHAIN` - Orchestration/pipeline steps
-- `CHAT_MODEL` - LLM calls
-- `RETRIEVER` - Vector search operations
-- `EMBEDDING` - Embedding generation
-- `PARSER` - Text processing/extraction
 - `MEMORY` - Conversation history management
+- `PARSER` - Text processing/extraction
+
+### 5. **Refined Metadata for MLflow UI (2.14+)**
+Standardized attributes to ensure visibility in the MLflow UI's main trace table and metadata pane:
+- **Top-Level Columns**: Mapped using `mlflow.tag.*` and `mlflow.user`.
+- **System Metadata**: Serialized as JSON in `mlflow.trace.inputs` and `mlflow.trace.outputs`.
+- **Custom Metadata Pane**: Extensive mapping to `mlflow.trace.metadata.*` for fields like `retriever_k`, `base_vector`, `team_name`, and `bot_id`.
 
 ---
 

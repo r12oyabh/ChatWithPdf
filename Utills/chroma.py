@@ -10,6 +10,24 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from Config.settings import settings
 from Config.logger import logger
 
+from opentelemetry import trace, metrics
+
+
+# Initialize tracer and meter
+tracer = trace.get_tracer("chroma.service")
+meter = metrics.get_meter("chroma.service")
+
+# Metrics
+doc_storage_counter = meter.create_counter(
+    name="chroma_documents_stored_total",
+    description="Total number of documents stored in ChromaDB",
+    unit="1"
+)
+doc_retrieval_counter = meter.create_counter(
+    name="chroma_retrievals_total",
+    description="Total number of retrieval operations",
+    unit="1"
+)
 
 class ChromaDBService:
     """Service class for ChromaDB vector database operations."""
@@ -92,71 +110,49 @@ class ChromaDBService:
         except Exception:
             return {"name": collection_name, "count": 0, "metadata": {}}
     
-    @mlflow.trace(name="ChromaDB.create_vectorstore", span_type="RETRIEVER")
     def create_vectorstore(self, user_id: str) -> Chroma:
         """
         Create a Chroma instance for a specific user.
-        
-        Args:
-            user_id: User identifier (equivalent to Pinecone namespace)
-            
-        Returns:
-            Chroma instance
         """
-        collection_name = self._get_user_collection_name(user_id)
-        self._ensure_collection_exists(collection_name)
+        doc_retrieval_counter.add(1, {"user_id": user_id})
         
-        # Get collection stats for tracing
-        stats = self.get_collection_stats(user_id)
-        
-        vectorstore = Chroma(
-            client=self.client,
-            collection_name=collection_name,
-            embedding_function=self.embeddings
-        )
-        
-        # Add metadata to current span for visibility
-        with mlflow.start_span(name="Collection_Stats", span_type="RETRIEVER") as span:
-            span.set_inputs({"user_id": user_id})
-            span.set_outputs({
-                "collection_name": collection_name,
-                "document_count": stats.get('count', 0),
-                "vector_db_type": "ChromaDB"
-            })
-            span.set_attributes({
-                "embedding_model": settings.EMBEDDING_MODEL,
-                "embedding_dimension": 768,
-                "metric": settings.metric
-            })
-        
-        return vectorstore
-    
-    @mlflow.trace(name="ChromaDB.store_documents", span_type="EMBEDDING")
-    def store_documents(self, texts: list, user_id: str) -> Chroma:
-        """
-        Store text chunks in ChromaDB with user isolation.
-        
-        Args:
-            texts: List of text chunks to store
-            user_id: User identifier (equivalent to Pinecone namespace)
+        with tracer.start_as_current_span("chroma_create_vectorstore") as otel_span:
+            otel_span.set_attribute("mlflow.spanType", "RETRIEVER")
+            otel_span.set_attribute("user.id", user_id)
             
-        Returns:
-            Chroma instance
-            
-        Raises:
-            Exception: If storage fails
-        """
-        try:
             collection_name = self._get_user_collection_name(user_id)
             self._ensure_collection_exists(collection_name)
             
-            # Add embedding span for visibility
-            with mlflow.start_span(name="Create_Embeddings", span_type="EMBEDDING") as embed_span:
-                embed_span.set_inputs({
-                    "num_texts": len(texts),
-                    "user_id": user_id,
-                    "total_characters": sum(len(text) for text in texts)
-                })
+            # Get collection stats for tracing
+            stats = self.get_collection_stats(user_id)
+            
+            vectorstore = Chroma(
+                client=self.client,
+                collection_name=collection_name,
+                embedding_function=self.embeddings
+            )
+            
+            otel_span.set_attribute("collection.name", collection_name)
+            otel_span.set_attribute("document.count", stats.get('count', 0))
+            otel_span.set_attribute("vector_db_type", "ChromaDB")
+        
+        return vectorstore
+    
+    def store_documents(self, texts: list, user_id: str) -> Chroma:
+        """
+        Store text chunks in ChromaDB with user isolation.
+        """
+        doc_storage_counter.add(len(texts), {"user_id": user_id})
+        
+        with tracer.start_as_current_span("chroma_store_documents") as otel_span:
+            otel_span.set_attribute("mlflow.spanType", "EMBEDDING")
+            otel_span.set_attribute("user.id", user_id)
+            otel_span.set_attribute("num_texts", len(texts))
+            otel_span.set_attribute("total_characters", sum(len(text) for text in texts))
+
+            try:
+                collection_name = self._get_user_collection_name(user_id)
+                self._ensure_collection_exists(collection_name)
                 
                 vectorstore = Chroma.from_texts(
                     texts=texts,
@@ -165,20 +161,13 @@ class ChromaDBService:
                     collection_name=collection_name
                 )
                 
-                embed_span.set_outputs({
-                    "success": True,
-                    "documents_stored": len(texts)
-                })
-                embed_span.set_attributes({
-                    "embedding_model": settings.EMBEDDING_MODEL,
-                    "collection_name": collection_name,
-                    "vector_db": "ChromaDB"
-                })
-            
-            logger.info(f"✅ Stored {len(texts)} documents for user '{user_id}'")
-            return vectorstore
-        except Exception as e:
-            raise Exception(f"Error storing documents in ChromaDB: {str(e)}")
+                otel_span.set_attribute("status", "success")
+                logger.info(f"✅ Stored {len(texts)} documents for user '{user_id}'")
+                return vectorstore
+            except Exception as e:
+                otel_span.set_attribute("status", "error")
+                otel_span.record_exception(e)
+                raise Exception(f"Error storing documents in ChromaDB: {str(e)}")
     
     def delete_user_collection(self, user_id: str) -> None:
         """

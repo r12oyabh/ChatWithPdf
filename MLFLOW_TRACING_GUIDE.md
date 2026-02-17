@@ -138,6 +138,25 @@ For each span, you can see:
 - ✅ **Attributes**: Model used, temperature, token counts
 - ✅ **Status**: OK or ERROR
 
+### Step 5: Viewing Custom Metadata (Bot ID, Team, etc.)
+
+To see the custom fields (like `bot_id`, `team_name`, `question`, `num_files`) that we added:
+
+1. **In the Trace List View**:
+   - Click functionality **Columns** button (usually top-right of the table).
+   - Search for `mlflow.trace.metadata.*`.
+   - Select columns like `mlflow.trace.metadata.bot_id`, `mlflow.trace.metadata.team_name`.
+   - These will now appear as columns in your main trace list!
+
+2. **In the Span Details (Right Panel)**:
+   - Click on the **Root Span** (the top-most bar in the waterfall, usually named `Chat: {bot_id}` or `Create Bot: {name}`).
+   - Look at the **Attributes** or **Tags** tab.
+   - You will see all the custom metadata there:
+     - `mlflow.trace.metadata.bot_id`
+     - `mlflow.trace.metadata.question`
+     - `mlflow.trace.inputs`
+     - `mlflow.trace.outputs`
+
 ## 💼 For Stakeholders (Non-Technical View)
 
 ### What This Means for You

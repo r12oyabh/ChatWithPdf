@@ -14,7 +14,40 @@ from Utills.botservice import bot_service
 from Config.logger import logger
 
 
+import time
+from opentelemetry import trace, metrics
+import json
+
+from datetime import datetime
+
+# Helper for JSON serialization of datetime
+def json_serial(obj):
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
 router = APIRouter(prefix="/bot", tags=["Bot Management"])
+
+# Initialize tracer and meter
+tracer = trace.get_tracer("bot.routes")
+meter = metrics.get_meter("bot.routes")
+
+# Metrics
+bot_creation_counter = meter.create_counter(
+    name="bot_creation_total",
+    description="Total number of bot creation attempts",
+    unit="1"
+)
+bot_error_counter = meter.create_counter(
+    name="bot_errors_total",
+    description="Total number of failed bot operations",
+    unit="1"
+)
+bot_latency = meter.create_histogram(
+    name="bot_operation_latency_seconds",
+    description="Latency of bot operations",
+    unit="s"
+)
 
 
 @router.post(
@@ -53,6 +86,25 @@ async def upload_and_create_bot(
     files: List[UploadFile] = File(..., description="Files to upload (PDF, DOCX, TXT)")
 ) -> BotCreateResponse:
     
+    start_time = time.time()
+    bot_creation_counter.add(1, {"team": team_name})
+
+    root_span = trace.get_current_span()
+
+    if root_span.is_recording():
+        root_span.set_attribute("mlflow.traceName", f"Create Bot: {bot_name}")
+        root_span.set_attribute("mlflow.trace.metadata.team_name", team_name)
+        root_span.set_attribute("mlflow.trace.metadata.bot_name", bot_name)
+        
+        # MLflow UI expects JSON for inputs/outputs to render nicely
+        inputs = {
+            "team_name": team_name,
+            "bot_name": bot_name,
+            "file_count": len(files)
+        }
+        root_span.set_attribute("mlflow.trace.inputs", json.dumps(inputs))
+        logger.info("✅ Set attributes on root span")
+
     logger.info(
         "Bot creation request received | team_name=%s | bot_name=%s | file_count=%d",
         team_name,
@@ -90,38 +142,86 @@ async def upload_and_create_bot(
                 detail="Bot name cannot be empty"
             )
         
-        logger.info("Validating and saving files | team_name=%s | bot_name=%s",
-            team_name,bot_name,)
+        with tracer.start_as_current_span("bot_creation_workflow") as span:
+            span.set_attribute("mlflow.traceName", f"Create Bot: {bot_name}")
+            span.set_attribute("mlflow.trace.metadata.team_name", team_name)
+            span.set_attribute("mlflow.trace.metadata.bot_name", bot_name)
+            span.set_attribute("mlflow.trace.metadata.num_files", len(files))
+            span.set_attribute("mlflow.trace.inputs", f"Team: {team_name}, Bot: {bot_name}, Files: {len(files)}")
+            
+            span.set_attribute("team.name", team_name)
+            span.set_attribute("bot.name", bot_name)
+            span.set_attribute("file.count", len(files))
 
-        # Validate and save files
-        file_paths = await validate_and_save_files(files)
-        
+            logger.info("Validating and saving files | team_name=%s | bot_name=%s",
+                team_name,bot_name,)
+
+            # Validate and save files
+            file_paths = await validate_and_save_files(files)
+            
+            logger.info(
+                "Files saved successfully | count=%d | team_name=%s | bot_name=%s",
+                len(file_paths),
+                team_name,
+                bot_name,
+            )
+
+            # Create bot
+            bot_metadata = bot_service.create_bot(
+                team_name=team_name.strip(),
+                bot_name=bot_name.strip(),
+                file_paths=file_paths
+            )
+            
+            span.set_attribute("bot.id", bot_metadata.get("bot_id", "unknown"))
+            span.set_attribute("mlflow.trace.metadata.bot_id", bot_metadata.get("bot_id", "unknown"))
+            span.set_attribute("mlflow.trace.outputs", f"Bot created with ID: {bot_metadata.get('bot_id')}")
+
+        duration = time.time() - start_time
+        if root_span.is_recording():
+            root_span.set_attribute("mlflow.trace.metadata.execution_time", f"{duration:.3f}s")
+            root_span.set_attribute("mlflow.trace.metadata.num_files", len(files))
+            root_span.set_attribute("mlflow.trace.outputs", json.dumps(bot_metadata, default=json_serial))
+            
+            # Custom Metadata (Verbose for User Request)
+            root_span.set_attribute("mlflow.trace.metadata.bot_id", bot_metadata.get("bot_id"))
+            root_span.set_attribute("mlflow.trace.metadata.bot_name", bot_name)
+            root_span.set_attribute("mlflow.trace.metadata.team_name", team_name)
+            root_span.set_attribute("mlflow.trace.metadata.num_files", len(files))
+            root_span.set_attribute("mlflow.trace.metadata.operation", "create_bot")
+            root_span.set_attribute("mlflow.trace.metadata.operations", "create_bot")
+            root_span.set_attribute("mlflow.trace.metadata.User", team_name)
+            root_span.set_attribute("mlflow.trace.metadata.Run_name", f"Create-{bot_name}")
+            root_span.set_attribute("mlflow.trace.metadata.base_vector", "ChromaDB")
+            root_span.set_attribute("mlflow.trace.metadata.vectordbname", "ChromaDB")
+
+            # MLflow UI Standard Tags/Columns
+            root_span.set_attribute("mlflow.user", team_name)
+            root_span.set_attribute("mlflow.runName", f"Create-{bot_name}")
+            root_span.set_attribute("mlflow.tag.User", team_name)
+            root_span.set_attribute("mlflow.tag.Run_name", f"Create-{bot_name}")
+            root_span.set_attribute("mlflow.tag.team_name", team_name)
+            root_span.set_attribute("mlflow.tag.bot_id", bot_metadata.get("bot_id"))
+            root_span.set_attribute("mlflow.tag.bot_name", bot_name)
+            root_span.set_attribute("mlflow.tag.operation", "create_bot")
+        bot_latency.record(duration, {"operation": "create", "team": team_name})
+
         logger.info(
-            "Files saved successfully | count=%d | team_name=%s | bot_name=%s",
-            len(file_paths),
-            team_name,
-            bot_name,
-        )
-
-        # Create bot
-        bot_metadata = bot_service.create_bot(
-            team_name=team_name.strip(),
-            bot_name=bot_name.strip(),
-            file_paths=file_paths
-        )
-
-        logger.info(
-            "Bot created successfully | bot_id=%s | team_name=%s | bot_name=%s",
+            "Bot created successfully | bot_id=%s | team_name=%s | bot_name=%s | duration=%.3fs",
             bot_metadata.get("bot_id"),
             team_name,
             bot_name,
+            duration
         )        
         # Return response
         return BotCreateResponse(**bot_metadata, message="Bot created successfully")
        
     except HTTPException:
+        bot_error_counter.add(1, {"operation": "create", "type": "http_exception"})
         raise
     except Exception as e:
+        bot_error_counter.add(1, {"operation": "create", "type": "error"})
+        logger.exception("Error creating bot | team_name=%s | bot_name=%s", team_name, bot_name)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating bot: {str(e)}"
@@ -153,6 +253,7 @@ async def delete_bot(bot_id: str):
     Raises:
         HTTPException: If bot not found or deletion fails
     """
+    start_time = time.time()
     try:
         # Check if bot exists
         if not bot_service.bot_exists(bot_id):
@@ -161,9 +262,14 @@ async def delete_bot(bot_id: str):
                 detail=f"Bot with ID '{bot_id}' not found"
             )
         
-        # Delete bot
-        bot_service.delete_bot(bot_id)
-        logger.info("Bot deleted successfully | bot_id=%s", bot_id)
+        with tracer.start_as_current_span("bot_deletion") as span:
+            span.set_attribute("bot.id", bot_id)
+            # Delete bot
+            bot_service.delete_bot(bot_id)
+        
+        duration = time.time() - start_time
+        bot_latency.record(duration, {"operation": "delete"})
+        logger.info("Bot deleted successfully | bot_id=%s | duration=%.3fs", bot_id, duration)
 
         return {
             "message": f"Bot '{bot_id}' deleted successfully",
@@ -171,8 +277,10 @@ async def delete_bot(bot_id: str):
         }
         
     except HTTPException:
+        bot_error_counter.add(1, {"operation": "delete", "type": "http_exception"})
         raise
     except Exception as e:
+        bot_error_counter.add(1, {"operation": "delete", "type": "error"})
         logger.exception("Unhandled error during bot deletion | bot_id=%s", bot_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
