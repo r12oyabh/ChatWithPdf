@@ -7,3 +7,6 @@ mlflow.db
 mlartifacts
 chroma_db
 uploaded_files
+
+WINDOWS_OTEL_JAEGER_SETUP.md
+vector_db

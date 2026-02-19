@@ -3,40 +3,18 @@ Production-ready evaluation service for MLflow GenAI metrics.
 Uses MLflow's built-in evaluation framework with Azure OpenAI as the judge LLM.
 """
 import os
-import mlflow
 import pandas as pd
 from typing import Dict, List, Optional
 from langchain_core.prompts import ChatPromptTemplate
-from ragas import evaluate as ragas_evaluate
-from ragas.metrics import context_precision, context_recall
-from datasets import Dataset
-from ragas.llms import LangchainLLMWrapper
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from ragas.embeddings import LangchainEmbeddingsWrapper
 from mlflow.metrics.genai import faithfulness, answer_relevance
-
-from opentelemetry import trace, metrics
+import mlflow
 
 from Config.settings import settings
 from Config.logger import logger
 from Utills.llm import LLMManager
+from Config.telemetry import tracer, meter
 
 
-# Initialize tracer and meter
-tracer = trace.get_tracer("evaluation.service")
-meter = metrics.get_meter("evaluation.service")
-
-# Metrics
-eval_counter = meter.create_counter(
-    name="evaluation_total",
-    description="Total number of evaluations performed",
-    unit="1"
-)
-eval_quality_histogram = meter.create_histogram(
-    name="evaluation_quality_score",
-    description="Distribution of evaluation quality scores",
-    unit="1"
-)
 
 class EvaluationService:
     """Production-ready service for evaluating RAG responses using MLflow's built-in metrics."""
@@ -48,8 +26,6 @@ class EvaluationService:
         os.environ["OPENAI_API_KEY"] = settings.OPEN_API_KEY
         os.environ["OPENAI_API_VERSION"] = settings.AZURE_OPENAI_API_VERSION
         os.environ["OPENAI_DEPLOYMENT_NAME"] = settings.AZURE_OPENAI_DEPLOYMENT
-        
-        mlflow.openai.autolog()
         
         try:
             self.llm = LLMManager().llm
@@ -69,13 +45,15 @@ class EvaluationService:
     ) -> Dict:
         """
         Evaluate a single RAG response using MLflow's built-in metrics.
-        """
-        eval_counter.add(1)
-        
-        with tracer.start_as_current_span("MLflow_Evaluation") as otel_span:
-            otel_span.set_attribute("mlflow.spanType", "PARSER")
-            otel_span.set_attribute("has_ground_truth", ground_truth is not None)
-            
+        """            
+        with tracer.start_as_current_span(
+            "evaluate_single",
+            attributes={
+                "rag.question": question,
+                "rag.answer_length": len(answer),
+                "rag.context_count": len(context)
+            }
+        ) as span:
             try:
                 # Convert single example to batch format for MLflow evaluation
                 results = self.evaluate_batch(
@@ -84,20 +62,20 @@ class EvaluationService:
                     contexts=[context],
                     ground_truths=[ground_truth] if ground_truth else None
                 )
-                
                 # Extract metrics from the first (and only) row
                 if results:
-                    quality = results.get("average_quality_score", 0)
-                    otel_span.set_attribute("quality_score", quality)
-                    eval_quality_histogram.record(quality)
+                    for k, v in results.items():
+                        if isinstance(v, (int, float)):
+                            span.set_attribute(f"rag.evaluation.{k}", v)
                     return results
                 else:
                     logger.warning("Evaluation returned no results")
                     return {}
             except Exception as e:
-                otel_span.record_exception(e)
+                span.record_exception(e)
                 logger.error(f"❌ Error during single evaluation: {str(e)}")
                 return {}
+
 
     def evaluate_batch(
         self,
@@ -118,10 +96,9 @@ class EvaluationService:
         Returns:
             Dictionary of aggregated evaluation metrics
         """
-        try:
-            with tracer.start_as_current_span("MLflow_Batch_Evaluation") as otel_span:
-                otel_span.set_attribute("mlflow.spanType", "PARSER")
-                
+        with tracer.start_as_current_span("mlflow_evaluate_batch") as span:
+            span.set_attribute("batch_size", len(questions))
+            try:
                 # Prepare data in MLflow's expected format
                 eval_data = pd.DataFrame({
                     "inputs": questions,
@@ -130,22 +107,15 @@ class EvaluationService:
                 })
                 
                 if ground_truths:
-                    eval_data["ground_truth"] = ground_truths
+                    eval_data["ground_truth"] = ground_truths            
                 
-                otel_span.set_attribute("num_examples", len(questions))
-                otel_span.set_attribute("has_ground_truth", ground_truths is not None)
-            
-            # Import MLflow metrics
-            
-            # Create metrics with Azure OpenAI as judge
-            faithfulness_metric = faithfulness(model=f"openai:/{settings.AZURE_OPENAI_DEPLOYMENT}")
-            answer_relevance_metric = answer_relevance(model=f"openai:/{settings.AZURE_OPENAI_DEPLOYMENT}")
-            
-            logger.info(f"Starting MLflow evaluation for {len(questions)} example(s)")
-            
-            # Run MLflow evaluation
-            with tracer.start_as_current_span("Run_MLflow_Evaluate") as span:
-                span.set_attribute("mlflow.spanType", "PARSER")
+                # Create metrics with Azure OpenAI as judge
+                faithfulness_metric = faithfulness(model=f"openai:/{settings.AZURE_OPENAI_DEPLOYMENT}")
+                answer_relevance_metric = answer_relevance(model=f"openai:/{settings.AZURE_OPENAI_DEPLOYMENT}")
+                
+                logger.info(f"Starting MLflow evaluation for {len(questions)} example(s)")
+                
+                # Run MLflow evaluation
                 results = mlflow.evaluate(
                     data=eval_data,
                     model_type="question-answering",
@@ -153,106 +123,39 @@ class EvaluationService:
                     predictions="predictions",
                     extra_metrics=[faithfulness_metric, answer_relevance_metric],
                 )
-            
-            # Extract and normalize metrics for backward compatibility
-            metrics = {}
-            
-            # MLflow metrics are on 1-5 scale, normalize to 0.0-1.0 for backward compatibility
-            if "faithfulness/v1/mean" in results.metrics:
-                # Normalize from 1-5 scale to 0.0-1.0 scale
-                faithfulness_raw = results.metrics["faithfulness/v1/mean"]
-                metrics["faithfulness_score"] = (faithfulness_raw - 1) / 4  # Convert 1-5 to 0-1
-                metrics["faithfulness_raw"] = faithfulness_raw  # Keep original for reference
-            
-            if "answer_relevance/v1/mean" in results.metrics:
-                relevance_raw = results.metrics["answer_relevance/v1/mean"]
-                metrics["relevance_score"] = (relevance_raw - 1) / 4  # Convert 1-5 to 0-1
-                metrics["answer_relevance_raw"] = relevance_raw  # Keep original for reference
-            
-            # Add RAGAS metrics if ground truth is provided
-            if ground_truths:
-                try:
-                    ragas_scores = self._evaluate_ragas_metrics(
-                        questions[0], answers[0], contexts[0], ground_truths[0]
-                    )
-                    metrics.update(ragas_scores)
-                except Exception as e:
-                    logger.warning(f"RAGAS evaluation failed: {e}")
-            
-            # Calculate average quality score
-            valid_scores = [
-                metrics.get("faithfulness_score", 0),
-                metrics.get("relevance_score", 0)
-            ]
-            metrics["average_quality_score"] = sum(valid_scores) / len(valid_scores) if valid_scores else 0.0
-            
-            # Log metrics to MLflow
-            if mlflow.active_run():
-                mlflow.log_metrics(metrics)
-            
-            logger.info(f"✅ Evaluation completed: {metrics}")
-            return metrics
-            
-        except Exception as e:
-            logger.error(f"❌ MLflow batch evaluation failed: {str(e)}")
-            # Fallback to custom evaluation if MLflow fails
-            logger.info("Attempting fallback to custom evaluation...")
-            return self._fallback_evaluation(questions[0], answers[0], contexts[0])
+                
+                # Extract and normalize metrics for backward compatibility
+                metrics = {}
+                
+                # MLflow metrics are on 1-5 scale, normalize to 0.0-1.0 for backward compatibility
+                if "faithfulness/v1/mean" in results.metrics:
+                    # Normalize from 1-5 scale to 0.0-1.0 scale
+                    faithfulness_raw = results.metrics["faithfulness/v1/mean"]
+                    metrics["faithfulness_score"] = (faithfulness_raw - 1) / 4  # Convert 1-5 to 0-1
+                    metrics["faithfulness_raw"] = faithfulness_raw  # Keep original for reference
+                
+                if "answer_relevance/v1/mean" in results.metrics:
+                    relevance_raw = results.metrics["answer_relevance/v1/mean"]
+                    metrics["relevance_score"] = (relevance_raw - 1) / 4  # Convert 1-5 to 0-1
+                    metrics["answer_relevance_raw"] = relevance_raw  # Keep original for reference
+                
+                # Calculate average quality score
+                valid_scores = [
+                    metrics.get("faithfulness_score", 0),
+                    metrics.get("relevance_score", 0)
+                ]
+                metrics["average_quality_score"] = sum(valid_scores) / len(valid_scores) if valid_scores else 0.0
+                
+                logger.info(f"✅ Evaluation completed: {metrics}")
+                return metrics
+                
+            except Exception as e:
+                span.record_exception(e)
+                logger.error(f"❌ MLflow batch evaluation failed: {str(e)}")
+                # Fallback to custom evaluation if MLflow fails
+                logger.info("Attempting fallback to custom evaluation...")
+                return self._fallback_evaluation(questions[0], answers[0], contexts[0])
 
-    def _evaluate_ragas_metrics(
-        self, 
-        question: str, 
-        answer: str, 
-        context: List[str], 
-        ground_truth: str
-    ) -> Dict:
-        """
-        Evaluate using RAGAS library metrics (context precision and recall).
-        
-        This is kept for additional retrieval quality metrics when ground truth is available.
-        """
-        try:
-            with tracer.start_as_current_span("RAGAS_Evaluation") as otel_span:
-                otel_span.set_attribute("mlflow.spanType", "PARSER")
-                
-                # Prepare data for RAGAS
-                data = {
-                    "question": [question],
-                    "answer": [answer],
-                    "contexts": [context],
-                    "ground_truth": [ground_truth]
-                }
-                dataset = Dataset.from_dict(data)
-                
-                # Configure RAGAS to use our Azure LLM
-                ragas_llm = LangchainLLMWrapper(self.llm)
-                ragas_embeddings = LangchainEmbeddingsWrapper(GoogleGenerativeAIEmbeddings(
-                    google_api_key=settings.GEMINI_API_KEY,
-                ))
-
-                # Update metrics with our LLM/Embeddings
-                context_precision.llm = ragas_llm
-                context_recall.llm = ragas_llm
-                
-                # Run evaluation
-                results = ragas_evaluate(
-                    dataset=dataset,
-                    metrics=[context_precision, context_recall],
-                    llm=ragas_llm, 
-                    embeddings=ragas_embeddings 
-                )
-                
-                scores = {
-                    "context_precision_score": results["context_precision"],
-                    "context_recall_score": results["context_recall"]
-                }
-                otel_span.set_attribute("context_precision_score", scores["context_precision_score"])
-                otel_span.set_attribute("context_recall_score", scores["context_recall_score"])
-                return scores
-
-        except Exception as e:
-            logger.error(f"❌ RAGAS evaluation failed: {e}")
-            return {}
 
     def _fallback_evaluation(self, question: str, answer: str, context: List[str]) -> Dict:
         """
@@ -261,8 +164,6 @@ class EvaluationService:
         This ensures the system continues to work even if MLflow has issues.
         """
         try:
-            with tracer.start_as_current_span("Fallback_Evaluation") as otel_span:
-                otel_span.set_attribute("mlflow.spanType", "CHAT_MODEL")
             logger.info("Using fallback custom evaluation")
             
             # Simple faithfulness check

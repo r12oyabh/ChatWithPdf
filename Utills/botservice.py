@@ -5,9 +5,7 @@ Bot service for creating and managing chatbot instances.
 import os
 from datetime import datetime
 from typing import List, Dict
-import mlflow
 
-from opentelemetry import trace
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter  # ✅ Modern
 from Config.logger import logger
@@ -20,7 +18,6 @@ from Utills.file_utills import (
 )
 
 # Initialize tracer
-tracer = trace.get_tracer("bot.service")
 
 class BotService:
     """Service class for bot creation and management."""
@@ -54,42 +51,15 @@ class BotService:
             logger.info(f"   Bot ID: {bot_id}")
             logger.info(f"   Namespace: {namespace}")
             
-            # Get current span to set attributes
-            current_span = trace.get_current_span()
-            if current_span.is_recording():
-                current_span.set_attribute("mlflow.spanType", "CHAIN")
-                current_span.set_attribute("mlflow.trace.metadata.bot_id", bot_id)
-                current_span.set_attribute("mlflow.trace.metadata.team_name", team_name)
-                current_span.set_attribute("mlflow.trace.metadata.bot_name", bot_name)
-                current_span.set_attribute("mlflow.trace.metadata.num_files", len(file_paths))
-                current_span.set_attribute("mlflow.trace.metadata.operation", "create_bot")
-            
-            # STEP 1: Extract text from files
-            with tracer.start_as_current_span("extract_text") as otel_span:
-                otel_span.set_attribute("mlflow.spanType", "PARSER")
-                otel_span.set_attribute("num_files", len(file_paths))
-                otel_span.set_attribute("file_names", [os.path.basename(fp) for fp in file_paths])
+            all_text, file_names = self._extract_text_from_files(file_paths)
                 
-                all_text, file_names = self._extract_text_from_files(file_paths)
-                
-                otel_span.set_attribute("total_characters", len(all_text))
-                otel_span.set_attribute("processed_files", len(file_names))
-                otel_span.set_attribute("extraction_successful", True)
-            
             logger.info(f"   ✅ Extracted {len(all_text)} characters from {len(file_names)} file(s)")
             
             # STEP 2: Split text into chunks
-            with tracer.start_as_current_span("chunk_text") as otel_span:
-                otel_span.set_attribute("mlflow.spanType", "PARSER")
-                otel_span.set_attribute("chunk_size", settings.chunk_size)
-                otel_span.set_attribute("chunk_overlap", settings.chunk_overlap)
-                otel_span.set_attribute("text_length", len(all_text))
                 
-                chunks = self.text_splitter.split_text(all_text)
+            chunks = self.text_splitter.split_text(all_text)
                 
-                otel_span.set_attribute("num_chunks", len(chunks))
-                avg_chunk_size = sum(len(c) for c in chunks) // len(chunks) if chunks else 0
-                otel_span.set_attribute("avg_chunk_size", avg_chunk_size)
+            avg_chunk_size = sum(len(c) for c in chunks) // len(chunks) if chunks else 0
             
             logger.info(f"   ✅ Created {len(chunks)} chunks")
             
@@ -167,8 +137,6 @@ class BotService:
             Exception: If deletion fails
         """
         try:
-            with tracer.start_as_current_span("delete_bot") as span:
-                span.set_attribute("bot.id", bot_id)
                 chromadb_service.delete_user_collection(bot_id)
                 logger.info(f"✅ Bot '{bot_id}' deleted successfully")
         except Exception as e:

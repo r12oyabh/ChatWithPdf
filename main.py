@@ -10,30 +10,14 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from datetime import datetime
 import uvicorn
-import mlflow
 import os
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry import trace, metrics
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+import json
+import logging
 
+from Config.telemetry import init_telemetry
 
-logger.info("Starting MultiAgent application")
-
-provider = TracerProvider()
-
-experiment = mlflow.get_experiment_by_name(settings.ML_FLOW_EXPERIMENT_NAME)
-
-otlp_exporter = OTLPSpanExporter(
-    endpoint=f"{settings.ML_FLOW_TRACKING_URL}/v1/traces",
-    headers={
-        "Content-Type": "application/x-protobuf",
-        "x-mlflow-experiment-id": experiment.experiment_id,
-    }
-)
-provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-trace.set_tracer_provider(provider)
+# Initialize Telemetry (Traces, Metrics, Logs) as soon as possible
+init_telemetry()
 
 app = FastAPI(
     title="MultiAgent",
@@ -44,12 +28,13 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 
+# Instrument FastAPI app
+init_telemetry(app=app)
+
+
 logger.info("Configuring CORS middleware")
-mlflow.set_tracking_uri(settings.ML_FLOW_TRACKING_URL)
-mlflow.set_experiment(settings.ML_FLOW_EXPERIMENT_NAME)
 
 # Enable LangChain autologging
-mlflow.langchain.autolog()
 logger.info("LangChain autologging enabled")
 
 # Add CORS middleware
@@ -114,7 +99,6 @@ logger.info("Bot routes registered")
 app.include_router(chat_router)
 logger.info("Chat routes registered")
 
-FastAPIInstrumentor.instrument_app(app)
 
 if __name__ == "__main__":
     logger.info("Running application with Uvicorn")

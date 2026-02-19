@@ -8,6 +8,15 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from Config.settings import settings
 from Config.logger import logger
+from Config.telemetry import tracer, meter
+
+# Define metrics
+pinecone_storage_counter = meter.create_counter(
+    "rag.pinecone.documents_stored",
+    unit="1",
+    description="Number of documents stored in Pinecone"
+)
+
 
 
 class PineconeService:
@@ -81,12 +90,15 @@ class PineconeService:
         Returns:
             PineconeVectorStore instance
         """
-        return PineconeVectorStore(
-            index=self.index,
-            embedding=self.embeddings,
-            text_key="text",
-            namespace=namespace
-        )
+        with tracer.start_as_current_span("pinecone_create_vectorstore") as span:
+            span.set_attribute("namespace", namespace)
+            return PineconeVectorStore(
+                index=self.index,
+                embedding=self.embeddings,
+                text_key="text",
+                namespace=namespace
+            )
+
     
     def store_documents(self, texts: list, namespace: str) -> PineconeVectorStore:
         """
@@ -102,16 +114,22 @@ class PineconeService:
         Raises:
             Exception: If storage fails
         """
-        try:
-            vectorstore = PineconeVectorStore.from_texts(
-                texts=texts,
-                embedding=self.embeddings,
-                index_name=settings.INDEX_NAME,
-                namespace=namespace
-            )
-            return vectorstore
-        except Exception as e:
-            raise Exception(f"Error storing documents in Pinecone: {str(e)}")
+        with tracer.start_as_current_span("pinecone_store_documents") as span:
+            span.set_attribute("namespace", namespace)
+            span.set_attribute("document_count", len(texts))
+            try:
+                vectorstore = PineconeVectorStore.from_texts(
+                    texts=texts,
+                    embedding=self.embeddings,
+                    index_name=settings.INDEX_NAME,
+                    namespace=namespace
+                )
+                pinecone_storage_counter.add(len(texts), {"namespace": namespace})
+                return vectorstore
+            except Exception as e:
+                span.record_exception(e)
+                raise Exception(f"Error storing documents in Pinecone: {str(e)}")
+
     
     def delete_namespace(self, namespace: str) -> None:
         """

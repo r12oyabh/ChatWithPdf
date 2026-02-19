@@ -13,7 +13,6 @@ from fastapi import UploadFile, HTTPException
 
 from Config.settings import settings
 from Config.logger import logger
-import mlflow
 
 def generate_bot_id(team_name: str, bot_name: str) -> str:
     """

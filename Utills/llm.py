@@ -1,9 +1,9 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import AzureChatOpenAI
-import mlflow
-from mlflow.entities import SpanType
+
 from Config.logger import logger
 from Config.settings import settings
+from Config.telemetry import tracer
 
 
 class LLMManager:
@@ -18,19 +18,11 @@ class LLMManager:
         self._llm_type = None  # Tracks which LLM is currently in use
         self._initialize_llm()
 
-    @mlflow.trace(name="Initialize_LLM", span_type=SpanType.CHAIN)
     def _initialize_llm(self):
         """Initialize the primary LLM (Azure OpenAI), fallback to Gemini."""
-        try:
-            # Track Azure OpenAI initialization
-            with mlflow.start_span(name="Setup_Azure_OpenAI", span_type=SpanType.CHAT_MODEL) as span:
-                span.set_inputs({
-                    "provider": "Azure OpenAI",
-                    "deployment": settings.AZURE_OPENAI_DEPLOYMENT,
-                    "api_version": settings.AZURE_OPENAI_API_VERSION
-                })
-                
-                mlflow.openai.autolog()
+        with tracer.start_as_current_span("_initialize_llm") as span:
+            try:
+                # Track Azure OpenAI initialization
                 self._llm = AzureChatOpenAI(
                     azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT,  # e.g., "gpt-4o"
                     api_version=settings.AZURE_OPENAI_API_VERSION,  # e.g., "2023-06-01-preview"
@@ -39,28 +31,19 @@ class LLMManager:
                     max_retries=2,
                 )
                 self._llm_type = "azure"
-                
-                span.set_outputs({
-                    "llm_type": "azure",
-                    "model": settings.AZURE_OPENAI_DEPLOYMENT,
-                    "success": True
-                })
-                span.set_attributes({
-                    "provider": "Azure OpenAI",
-                    "temperature": settings.TEMPERATURE,
-                    "max_retries": 2
-                })
-                
+                span.set_attribute("llm.type", "azure")
+                                    
                 logger.info(f"LLM initialized with Azure OpenAI deployment: {settings.AZURE_OPENAI_DEPLOYMENT}")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Azure OpenAI LLM: {e}")
-            logger.info("Falling back to Google Gemini...")
-            self._initialize_gemini_llm()
+            except Exception as e:
+                span.record_exception(e)
+                logger.warning(f"Failed to initialize Azure OpenAI LLM: {e}")
+                logger.info("Falling back to Google Gemini...")
+                self._initialize_gemini_llm()
+
 
     def _initialize_gemini_llm(self):
         """Initialize the Google Gemini LLM."""
         try:
-            mlflow.gemini.autolog()
             self._llm = ChatGoogleGenerativeAI(
                 temperature=settings.TEMPERATURE,
                 model=settings.GEMINI_MODEL,
@@ -89,13 +72,18 @@ class LLMManager:
         Call the LLM. If Azure OpenAI fails due to quota or token errors, 
         automatically switch to Google Gemini.
         """
-        try:
-            return self.llm(*args, **kwargs)
-        except Exception as e:
-            logger.warning(f"{self._llm_type} LLM failed with error: {e}")
-            if self._llm_type == "azure":
-                logger.info("Switching to Google Gemini due to Azure OpenAI failure...")
-                self._initialize_gemini_llm()
+        with tracer.start_as_current_span("llm_call") as span:
+            span.set_attribute("llm.type", self._llm_type)
+            try:
                 return self.llm(*args, **kwargs)
-            else:
-                raise e
+            except Exception as e:
+                span.record_exception(e)
+                logger.warning(f"{self._llm_type} LLM failed with error: {e}")
+                if self._llm_type == "azure":
+                    logger.info("Switching to Google Gemini due to Azure OpenAI failure...")
+                    self._initialize_gemini_llm()
+                    span.set_attribute("llm.fallback", True)
+                    span.set_attribute("llm.new_type", "gemini")
+                    return self.llm(*args, **kwargs)
+                else:
+                    raise e

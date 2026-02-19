@@ -30,7 +30,15 @@ dependencies = [
     "definitions (>=0.2.0,<0.3.0)",
     "ipython (>=9.10.0,<10.0.0)",
     "opentelemetry-instrumentation-fastapi (>=0.60b1,<0.61)",
-    "opentelemetry-exporter-otlp (>=1.39.1,<2.0.0)"
+    "opentelemetry-exporter-otlp (>=1.39.1,<2.0.0)",
+    "opentelemetry-instrumentation-logging (>=0.60b1,<0.61)",
+    "opentelemetry-instrumentation-requests (>=0.60b1,<0.61)",
+    "umap-learn (>=0.5.11,<0.6.0)",
+    "matplotlib (>=3.10.8,<4.0.0)",
+    "plotly (>=6.5.2,<7.0.0)",
+    "langchain-huggingface (>=1.2.0,<2.0.0)",
+    "pypdfium2 (>=5.5.0,<6.0.0)",
+    "sentence-transformers (>=5.2.3,<6.0.0)"
 ]
 
 
