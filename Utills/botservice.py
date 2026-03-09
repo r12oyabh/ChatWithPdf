@@ -147,6 +147,7 @@ class BotService:
             cleanup_files(file_paths)
             raise Exception(f"Error creating bot: {str(e)}")
     
+    @mlflow.trace
     def _extract_text_from_files(self, file_paths: List[str]) -> tuple[str, List[str]]:
         """
         Extract text from multiple files.

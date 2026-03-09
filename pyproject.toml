@@ -27,7 +27,14 @@ dependencies = [
     "langchain-chroma (>=1.1.0,<2.0.0)",
     "langchain-openai (>=1.1.9,<2.0.0)",
     "ragas (>=0.4.3,<0.5.0)",
-    "definitions (>=0.2.0,<0.3.0)"
+    "definitions (>=0.2.0,<0.3.0)",
+    "sse-starlette (>=3.2.0,<4.0.0)",
+    "sseclient-py (>=1.9.0,<2.0.0)",
+    "langgraph-supervisor (>=0.0.31,<0.0.32)",
+    "langchain-core (>=1.2.16,<2.0.0)",
+    "langchain-mongodb (>=0.11.0,<0.12.0)",
+    "langgraph (>=1.0.10,<2.0.0)",
+    "pymongo (>=4.16.0,<5.0.0)"
 ]
 
 

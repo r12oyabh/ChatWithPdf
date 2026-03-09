@@ -6,7 +6,7 @@ import chromadb
 import mlflow
 from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-
+from langchain_openai import AzureOpenAIEmbeddings
 from Config.settings import settings
 from Config.logger import logger
 
@@ -27,10 +27,16 @@ class ChromaDBService:
         """Initialize ChromaDB service (only once)."""
         if not self._initialized:
             self.client = chromadb.PersistentClient(path=settings.CHROMA_DB_PATH)
-            self.embeddings = GoogleGenerativeAIEmbeddings(
-                model=settings.EMBEDDING_MODEL,
-                google_api_key=settings.GEMINI_API_KEY
+            self.embeddings=AzureOpenAIEmbeddings(
+                api_key=settings.OPEN_API_KEY,
+                model=settings.openai_embedding_model,
+                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                api_version=settings.API_VERSION,
             )
+            # self.embeddings = GoogleGenerativeAIEmbeddings(
+            #     model=settings.EMBEDDING_MODEL,
+            #     google_api_key=settings.GEMINI_API_KEY
+            # )
             ChromaDBService._initialized = True
     
     def _get_user_collection_name(self, user_id: str) -> str:

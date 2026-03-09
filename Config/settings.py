@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     # Embedding and LLM models
     EMBEDDING_MODEL: str
+    openai_embedding_model:str
+    API_VERSION:str
     GEMINI_MODEL: str
     TEMPERATURE: float
 

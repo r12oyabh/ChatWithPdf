@@ -7,3 +7,9 @@ mlflow.db
 mlartifacts
 chroma_db
 uploaded_files
+vector_db
+vector_db1
+Fraud.ipynb
+text_to_mongo.ipynb
+mongo_agent.ipynb
+mongo1.ipynb

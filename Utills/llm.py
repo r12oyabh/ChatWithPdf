@@ -37,6 +37,7 @@ class LLMManager:
                     temperature=settings.TEMPERATURE,
                     openai_api_key=settings.OPEN_API_KEY,
                     max_retries=2,
+                    streaming=True
                 )
                 self._llm_type = "azure"
                 

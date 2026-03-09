@@ -2,6 +2,7 @@
 API routes for chat interactions.
 """
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from Schema.schema import(ChatRequest,ChatResponse,ErrorResponse)
 from Utills.chatservice import chat_service
 from Utills.botservice import bot_service
@@ -71,7 +72,7 @@ async def chat_with_bot(request: ChatRequest, background_tasks: BackgroundTasks)
             )
         
         # Get chat response
-        response = chat_service.chat(
+        response = await chat_service.chat(
             bot_id=request.bot_id,
             question=request.question,
             session_id=request.session_id
@@ -100,6 +101,52 @@ async def chat_with_bot(request: ChatRequest, background_tasks: BackgroundTasks)
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error during chat: {str(e)}"
         )
+
+
+@router.post(
+    "/stream",                    # ✅ separate route
+    summary="Stream chat with a bot",
+    description="""
+    Stream a response from a bot as Server-Sent Events (SSE).
+
+    - **bot_id**: Unique identifier of the bot (required)
+    - **question**: The question to ask the bot (required)
+    - **session_id**: Optional session ID for maintaining conversation history
+
+    Each chunk is sent as:  `data: <text>\\n\\n`
+    Final sentinel:         `data: [DONE] <json metadata>\\n\\n`
+    """,
+    responses={
+        200: {"description": "SSE stream"},
+        404: {"description": "Bot not found", "model": ErrorResponse},
+        500: {"description": "Internal server error", "model": ErrorResponse},
+    },
+    # ✅ No response_model — StreamingResponse bypasses Pydantic serialization
+)
+async def stream_chat_with_bot(request: ChatRequest) -> StreamingResponse:
+    logger.info("Stream request received | bot_id=%s | session_id=%s", request.bot_id, request.session_id)
+    try:
+        if not bot_service.bot_exists(request.bot_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Bot with ID '{request.bot_id}' not found"
+            )
+
+        # ✅ Returns StreamingResponse directly — do NOT subscript it
+        return await chat_service.stream_chat(
+            bot_id=request.bot_id,
+            question=request.question,
+            session_id=request.session_id
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error during streaming chat: {str(e)}"
+        )
+
 
 
 @router.delete(
