@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     API_VERSION:str
     GEMINI_MODEL: str
     TEMPERATURE: float
+    key:str
+    Location:str
+    endpoint:str
 
     ALLOWED_EXTENSIONS: List[str] = Field(
         default_factory=lambda: ["pdf", "docx", "txt"]

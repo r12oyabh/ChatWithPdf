@@ -55,9 +55,9 @@ class PineconeService:
                         region=settings.region
                     )
                 )
-                logger.info(f"✅ Index '{settings.INDEX_NAME}' created successfully")
+                logger.info(f"Index '{settings.INDEX_NAME}' created successfully")
             else:
-                logger.info(f"✅ Index '{settings.INDEX_NAME}' already exists")
+                logger.info(f"Index '{settings.INDEX_NAME}' already exists")
                 
         except Exception as e:
             raise Exception(f"Error ensuring Pinecone index exists: {str(e)}")
@@ -125,7 +125,7 @@ class PineconeService:
         """
         try:
             self.index.delete(delete_all=True, namespace=namespace)
-            logger.info(f"✅ Namespace '{namespace}' deleted successfully")
+            logger.info(f"Namespace '{namespace}' deleted successfully")
         except Exception as e:
             raise Exception(f"Error deleting namespace: {str(e)}")
     

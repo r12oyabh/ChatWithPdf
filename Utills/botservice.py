@@ -11,6 +11,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter  # ✅ Moder
 from Config.logger import logger
 from Config.settings import settings
 from Utills.chroma import chromadb_service
+from langchain_text_splitters import MarkdownHeaderTextSplitter  # ✅ Modern
+from langchain_text_splitters import RecursiveJsonSplitter
 
 from Utills.file_utills import (
     extract_text_from_file,
@@ -41,14 +43,14 @@ class BotService:
             Exception: If bot creation fails
         """
         try:
-            logger.info(f"\n🤖 Creating bot '{bot_name}' for team '{team_name}'...")
+            logger.info(f"\nCreating bot '{bot_name}' for team '{team_name}'...")
             
             # Generate unique bot ID and namespace
             bot_id = generate_bot_id(team_name, bot_name)
             namespace = generate_namespace(bot_id)
             
-            logger.info(f"   Bot ID: {bot_id}")
-            logger.info(f"   Namespace: {namespace}")
+            logger.info(f"Bot ID: {bot_id}")
+            logger.info(f"Namespace: {namespace}")
             
             # Update trace metadata
             mlflow.update_current_trace(
@@ -79,7 +81,7 @@ class BotService:
                     "parser_type": "multi_format"
                 })
             
-            logger.info(f"   ✅ Extracted {len(all_text)} characters from {len(file_names)} file(s)")
+            logger.info(f"Extracted {len(all_text)} characters from {len(file_names)} file(s)")
             
             # STEP 2: Split text into chunks
             with mlflow.start_span(name="Chunk_Documents", span_type="PARSER") as chunk_span:
@@ -101,7 +103,7 @@ class BotService:
                     "chunk_overlap": settings.chunk_overlap
                 })
             
-            logger.info(f"   ✅ Created {len(chunks)} chunks")
+            logger.info(f"Created {len(chunks)} chunks")
             
             # STEP 3: Store vectors in ChromaDB
             with mlflow.start_span(name="Store_In_VectorDB", span_type="EMBEDDING") as store_span:
@@ -111,7 +113,7 @@ class BotService:
                     "vector_db": "ChromaDB"
                 })
                 
-                logger.info(f"   🔄 Storing vectors in ChromaDB collection for user '{bot_id}'...")
+                logger.info(f"Storing vectors in ChromaDB collection for user '{bot_id}'...")
                 chromadb_service.store_documents(texts=chunks, user_id=bot_id)
                 
                 store_span.set_outputs({
@@ -135,7 +137,7 @@ class BotService:
                 'total_characters': len(all_text)
             }
             
-            logger.info(f"\n✅ Bot '{bot_name}' created successfully!")
+            logger.info(f"Bot '{bot_name}' created successfully!")
             
             # Clean up uploaded files after processing
             cleanup_files(file_paths)
@@ -166,7 +168,7 @@ class BotService:
         
         for file_path in file_paths:
             try:
-                logger.info(f"   📄 Processing: {file_path}")
+                logger.info(f"Processing: {file_path}")
                 text = extract_text_from_file(file_path)
                 
                 # Add file separator for clarity
@@ -195,7 +197,7 @@ class BotService:
         """
         try:
             chromadb_service.delete_user_collection(bot_id)
-            logger.info(f"✅ Bot '{bot_id}' deleted successfully")
+            logger.info(f"Bot '{bot_id}' deleted successfully")
         except Exception as e:
             raise Exception(f"Error deleting bot: {str(e)}")
     

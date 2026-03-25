@@ -17,6 +17,7 @@ from langchain_core.output_parsers import StrOutputParser
 import re
 import mlflow
 
+
 from Config.settings import settings
 from Utills.chroma import chromadb_service
 from Utills.file_utills import generate_namespace
@@ -83,7 +84,7 @@ Important:
             # Create vector store with user isolation
             vectorstore = chromadb_service.create_vectorstore(user_id=bot_id)
             retriever = vectorstore.as_retriever(
-                search_kwargs={"k":3}
+                search_kwargs={"k":15},search_type="mmr"
             )
             # Create retrieval chain
             retrieval_chain = create_retrieval_chain(
@@ -176,7 +177,7 @@ Important:
                 session_id = f"bot_{bot_id}_default"
 
             vectorstore = chromadb_service.create_vectorstore(user_id=bot_id)
-            retriever   = vectorstore.as_retriever(search_kwargs={"k": 3})
+            retriever   = vectorstore.as_retriever(search_kwargs={"k": 3},search_type="mmr")
             docs        = retriever.invoke(question)
 
             context = "\n\n".join(
@@ -270,7 +271,7 @@ Important:
                     })
 
                 except Exception as e:
-                    logger.error(f"❌ Streaming error: {e}")
+                    logger.error(f"Streaming error: {e}")
                     yield make_event({"type": "error", "message": str(e)})
                     yield make_event({"type": "done",  "bot_id": bot_id, "session_id": session_id})
 
@@ -285,7 +286,7 @@ Important:
             )
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize stream: {e}")
+            logger.error(f"Failed to initialize stream: {e}")
             raise Exception(f"Error during streaming chat: {str(e)}")
 
     @mlflow.trace(name="Get_Session_History", span_type="MEMORY")
@@ -312,7 +313,7 @@ Important:
         """
         if session_id in self.sessions:
             del self.sessions[session_id]
-            logger.info(f"✅ Session '{session_id}' cleared")
+            logger.info(f"Session '{session_id}' cleared")
     
     def get_session_count(self) -> int:
         """
@@ -333,7 +334,7 @@ Important:
             source_documents: List of source documents
         """
         try:
-            logger.info("🎬 Starting background evaluation...")
+            logger.info("Starting background evaluation...")
             context_texts = [doc['page_content'] for doc in source_documents]
             
             # Use evaluation service
@@ -344,7 +345,7 @@ Important:
             )
             logger.info(f"✅ Background evaluation metrics: {eval_metrics}")
         except Exception as e:
-            logger.error(f"❌ Failed to run background evaluation: {e}")
+            logger.error(f"Failed to run background evaluation: {e}")
 
 # Global chat service instance
 chat_service = ChatService()

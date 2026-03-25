@@ -34,11 +34,11 @@ class EvaluationService:
         
         try:
             self.llm = LLMManager().llm
-            logger.info(f"✅ Evaluation service initialized with Azure OpenAI (GPT-4o)")
-            logger.info(f"   Endpoint: {settings.AZURE_OPENAI_ENDPOINT}")
-            logger.info(f"   Deployment: {settings.AZURE_OPENAI_DEPLOYMENT}")
+            logger.info(f"Evaluation service initialized with Azure OpenAI (GPT-4o)")
+            logger.info(f"Endpoint: {settings.AZURE_OPENAI_ENDPOINT}")
+            logger.info(f"Deployment: {settings.AZURE_OPENAI_DEPLOYMENT}")
         except Exception as e:
-            logger.error(f"❌ Failed to initialize evaluation service: {e}")
+            logger.error(f"Failed to initialize evaluation service: {e}")
             raise e
 
     @mlflow.trace(name="MLflow_Evaluation", span_type="PARSER")
@@ -81,7 +81,7 @@ class EvaluationService:
                 return {}
                 
         except Exception as e:
-            logger.error(f"❌ Error during single evaluation: {str(e)}")
+            logger.error(f"Error during single evaluation: {str(e)}")
             return {}
 
     @mlflow.trace(name="MLflow_Batch_Evaluation", span_type="PARSER")
@@ -180,7 +180,7 @@ class EvaluationService:
             return metrics
             
         except Exception as e:
-            logger.error(f"❌ MLflow batch evaluation failed: {str(e)}")
+            logger.error(f"MLflow batch evaluation failed: {str(e)}")
             # Fallback to custom evaluation if MLflow fails
             logger.info("Attempting fallback to custom evaluation...")
             return self._fallback_evaluation(questions[0], answers[0], contexts[0])
@@ -235,7 +235,7 @@ class EvaluationService:
                 return scores
 
         except Exception as e:
-            logger.error(f"❌ RAGAS evaluation failed: {e}")
+            logger.error(f"RAGAS evaluation failed: {e}")
             return {}
 
     @mlflow.trace(name="Fallback_Evaluation", span_type="CHAT_MODEL")
@@ -298,7 +298,7 @@ class EvaluationService:
             return metrics
             
         except Exception as e:
-            logger.error(f"❌ Fallback evaluation also failed: {e}")
+            logger.error(f"Fallback evaluation also failed: {e}")
             return {
                 "faithfulness_score": 0.0,
                 "relevance_score": 0.0,

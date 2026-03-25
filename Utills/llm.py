@@ -15,7 +15,7 @@ class LLMManager:
 
     def __init__(self):
         self._llm = None
-        self._llm_type = None  # Tracks which LLM is currently in use
+        self._llm_type = None 
         self._initialize_llm()
 
     @mlflow.trace(name="Initialize_LLM", span_type=SpanType.CHAIN)
@@ -33,7 +33,7 @@ class LLMManager:
                 mlflow.openai.autolog()
                 self._llm = AzureChatOpenAI(
                     azure_deployment=settings.AZURE_OPENAI_DEPLOYMENT,  # e.g., "gpt-4o"
-                    api_version=settings.AZURE_OPENAI_API_VERSION,  # e.g., "2023-06-01-preview"
+                    api_version=settings.AZURE_OPENAI_API_VERSION, 
                     temperature=settings.TEMPERATURE,
                     openai_api_key=settings.OPEN_API_KEY,
                     max_retries=2,
