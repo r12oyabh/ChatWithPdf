@@ -5,7 +5,7 @@ from typing import List
 
 # Load environment variables from .env
 load_dotenv()
-
+ 
 class Settings(BaseSettings):
     # API Keys
     GEMINI_API_KEY: str
@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     CHROMA_DB_PATH:str
     COLLECTION_NAME:str
     LOG_DIR:str
+    openai_embedding_model: str
+    api_version: str
+    endpoint: str
+    location: str
+    key: str
+
     # Pydantic v2 way to configure BaseSettings
     model_config = ConfigDict(
         env_file=".env",
